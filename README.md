@@ -6,5 +6,8 @@ src/
 │   ├── preprocess.py                       
 ├── guide_assignment.py                 
 ├── qc_stats.py
+├── qc_plots
+  ├── qc_guide_type_distribution.ipynb
+  ├── qc_plot_cumulative_perturbation_fraction_of_genes.ipynb
 
 ```        
