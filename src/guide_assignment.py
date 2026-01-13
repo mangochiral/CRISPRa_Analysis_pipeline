@@ -14,6 +14,7 @@ from statsmodels.stats.multitest import multipletests
 from pathlib import Path
 import re
 import argparse
+from scipy import sparse
 
 class assign_sgrna:
     def __init__(self, path, crispr_adata):
@@ -103,7 +104,96 @@ class assign_sgrna:
         
         return assignment_crispat
 
+    def binary_obsm(self):
+        df_dummy = pd.get_dummies(self.perturbations[["cell", "gRNA"]], columns=["gRNA"], dtype="int")
+    
+        binary_matrix = (df_dummy.groupby("cell", sort=False).max())
+    
+    
+        return binary_matrix
 
+def run_guide_jobs(run):
+    # Worker for a single (colname, value) job.
+    processed_dir, colname, value = run
+
+    directory_path = os.path.join(processed_dir, f"{value}_{colname}")
+    if not os.path.isdir(directory_path):
+        print(f"{value}_{colname} not found")
+        return (colname, value)
+
+    expected_out = os.path.join(directory_path, f"{value}_gex_guide.h5ad")
+    if os.path.isfile(expected_out):
+        print(f"{expected_out} exists, skipping...")
+        return (colname, value)
+
+    crispr_pattern = glob.glob(os.path.join(directory_path, "*_crispr_preprocessed.h5ad"))
+    gex_pattern = glob.glob(os.path.join(directory_path, "*_gex_preprocessed.h5ad"))
+
+    if len(crispr_pattern) == 0 or len(gex_pattern) == 0:
+        print(f"Missing preprocessed h5ad in {directory_path}, skipping.")
+        return (colname, value)
+
+    # Read inputs
+    crispr_a = sc.read_h5ad(crispr_pattern[0])
+    gex_adata = sc.read(gex_pattern[0])   # or sc.read_h5ad if you prefer
+
+    guide_assign = assign_sgrna(directory_path, crispr_a)
+    guide_assign.run_guide_assign()
+    
+    binary_matrix = guide_assign.binary_obsm()
+
+    # assign guides to cells
+    assignment_crispat = guide_assign.merge_guide_assign()
+
+    if assignment_crispat.empty:
+        print(f"No assignments for {value}_{colname}, skipping write.")
+        return (colname, value)
+
+    # --- align assignment_crispat to gex_adata.obs ---
+    common_cells = assignment_crispat.index.intersection(gex_adata.obs.index)
+    assignment_crispat = assignment_crispat.loc[common_cells].copy()
+
+    if assignment_crispat.index.has_duplicates:
+        assignment_crispat = assignment_crispat[
+            ~assignment_crispat.index.duplicated(keep="first")
+        ]
+
+    # --- target_gene parsing ---
+    is_multi = assignment_crispat["guide_id"].astype(str).eq("multi_sgRNA")
+
+    assignment_crispat.loc[~is_multi, "target_gene"] = (
+        assignment_crispat.loc[~is_multi, "guide_id"]
+        .astype(str)
+        .str.replace("-", "_")
+        .str.split("_")
+        .str[0]
+    )
+    assignment_crispat.loc[is_multi, "target_gene"] = "multi_sgRNA"
+
+    # --- join onto obs ---
+    gex_adata.obs = gex_adata.obs.join(
+        assignment_crispat[["gRNA", "guide_id", "target_gene", "UMI_counts"]],
+        how="left",
+    )
+    # Align to adata.obs_names
+    binary_matrix = binary_matrix.reindex(index=gex_adata.obs_names, fill_value=0)
+
+    # Store sparse
+    gex_adata.obsm['guide_matrix'] = sparse.csr_matrix(binary_matrix.to_numpy(dtype="int8"))
+    gex_adata.uns["guide_matrix_cols"] = binary_matrix.columns.to_list()
+    
+    # Save outputs
+    assignment_crispat.to_csv(
+        os.path.join(directory_path, f"{value}_processed_guide.csv")
+    )
+    gex_adata.write_h5ad(
+        os.path.join(directory_path, f"{value}_gex_guide.h5ad")
+    )
+
+    return (colname, value)
+   
+     
+     
 def main():
     parser = argparse.ArgumentParser(description="Processing CRISPR assay")
     parser.add_argument(
@@ -112,83 +202,37 @@ def main():
         required=True,
         help="Path to directory that processed dir",
     )
-    # parser.add_argument(
-    #     "--main_dir",
-    #     type=str,
-    #     required=True,
-    #     help="Path to directory that main dir",
-    # )
     parser.add_argument(
         "--expmeta",
         type=str,
         required=True,
         help="Experiment metadata CSV filename",
     )
-    # parser.add_argument(
-    #     "--nprocs",
-    #     type=int,
-    #     help="Number of worker processes (currently unused)",
-    # )
+    parser.add_argument(
+        "--nprocs",
+        type=int,
+        default=mp.cpu_count(),
+        help="Number of worker processes",
+    )
     args = parser.parse_args()
-    
+
     exp_meta = pd.read_csv(os.path.join(args.processed_dir, args.expmeta))
-    
+
     # Drop any Unnamed index-like columns
     exp_meta = exp_meta.loc[:, ~exp_meta.columns.str.startswith("Unnamed")]
-    
-    for colname, coldata in exp_meta.items():
-        for value in coldata:
-            directory_path = os.path.join(args.processed_dir, f"{value}_{colname}")
-            if os.path.isdir(directory_path):
-                expected_out = os.path.join(directory_path, f"{value}_gex_guide.h5ad")
-                if os.path.isfile(expected_out):
-                    print(f"{value}_gex_guide.h5ad exists, skiping....")
-                    continue
-                
-                crispr_pattern = glob.glob(os.path.join(directory_path, "*_crispr_preprocessed.h5ad"))
-                gex_pattern = glob.glob(os.path.join(directory_path, "*_gex_preprocessed.h5ad"))
-                
-                if len(crispr_pattern) == 0 or len(gex_pattern) == 0:
-                    print(f"Missing preprocessed h5ad in {directory_path}, skipping.")
-                    continue
-                crispr_a = sc.read_h5ad(crispr_pattern[0])
-                gex_adata = sc.read(gex_pattern[0])
-                guide_assign = assign_sgrna(directory_path, crispr_a)
-                guide_assign.run_guide_assign()
-                
-                # assign guides to cells
-                assignment_crispat = guide_assign.merge_guide_assign()
-                
-                if assignment_crispat.empty:
-                    print(f"No assignments for {value}_{colname}, skipping write.")
-                    continue
-                
-                
-                # --- align assignment_crispat to gex_adata.obs ---
-                common_cells = assignment_crispat.index.intersection(gex_adata.obs.index)
-                assignment_crispat = assignment_crispat.loc[common_cells].copy()
-                
-                if assignment_crispat.index.has_duplicates:
-                    assignment_crispat = assignment_crispat[~assignment_crispat.index.duplicated(keep="first")]
 
-                
-                # --- target_gene parsing ---
-                is_multi = assignment_crispat["guide_id"].astype(str).eq("multi_sgRNA")
-                
-                assignment_crispat.loc[~is_multi, "target_gene"] = (
-                    assignment_crispat.loc[~is_multi, "guide_id"].astype(str).str.replace("-", "_").str.split("_").str[0])
-                assignment_crispat.loc[is_multi, "target_gene"] = "multi_sgRNA"
-                
-                # --- join onto obs ---
-                gex_adata.obs = gex_adata.obs.join(
-                    assignment_crispat[["gRNA", "guide_id", "target_gene", "UMI_counts"]],
-                    how="left")
-            
-                assignment_crispat.to_csv(os.path.join(directory_path, f"{value}_processed_guide.csv"))
-                gex_adata.write_h5ad(os.path.join(directory_path, f"{value}_gex_guide.h5ad"))
-            else:
-                print(f"{value}_{colname} not found")
-                continue
+    # Build list of jobs: one per (colname, value)
+    runs = [
+        (args.processed_dir, colname, value)
+        for colname, coldata in exp_meta.items()
+        for value in coldata
+    ]
+
+    ctx = mp.get_context("fork" if sys.platform != "win32" else "spawn")
+    with ctx.Pool(processes=args.nprocs) as pool:
+        for colname, value in pool.imap_unordered(run_guide_jobs, runs):
+            print(f"completed {value}_{colname}")
+
 
 if __name__ == "__main__":
     main()
