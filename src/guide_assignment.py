@@ -105,7 +105,8 @@ class assign_sgrna:
         return assignment_crispat
 
     def binary_obsm(self):
-        df_dummy = pd.get_dummies(self.perturbations[["cell", "gRNA"]], columns=["gRNA"], dtype="int")
+        df_dummy = pd.get_dummies(self.perturbations[["cell", "gRNA"]], columns=["gRNA"], 
+                                  dtype="int",prefix="", prefix_sep="")
     
         binary_matrix = (df_dummy.groupby("cell", sort=False).max())
     
