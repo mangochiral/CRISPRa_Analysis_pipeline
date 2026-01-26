@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -66,10 +67,12 @@ def run_guide_stats(run_procs):
     
         gex_adata.write_h5ad(os.path.join(directory_path, f"{sample_name}_gex_multiguide.h5ad"))
     
-    gex_a_df = guide_efficiency_record(gex_adata, multiguide=multiguide)
+    gex_a_df, gex_a_df_guide_cells_eff = guide_efficiency_record(gex_adata, multiguide=multiguide)
 
-    out_csv = os.path.join(directory_path, f"{sample_name}_guide_count_info.csv")
-    gex_a_df.to_csv(out_csv, index=False)
+    out_csv_1 = os.path.join(directory_path, f"{sample_name}_guide_count_info.csv")
+    out_csv_2 = os.path.join(directory_path, f"{sample_name}_cells_based_guide_efficiency.csv")
+    gex_a_df.to_csv(out_csv_1, index=False)
+    gex_a_df_guide_cells_eff.to_csv(out_csv_2, index=False)
 
     return (sample_name, lane_id)
 
@@ -142,6 +145,10 @@ def guide_efficiency_record(adata, multiguide = False):
     
     # NTC mask calculated once
     mask_ntc = adata.obs["guide_id"].astype(str).str.startswith('NTC').to_numpy()
+    
+    # For targeted gene NTC Expression to calculate the pseudo p value
+    ntc_expr_sorted_cache = {}
+    guide_dfs = []
 
 
     #Run loop on guide list
@@ -175,7 +182,7 @@ def guide_efficiency_record(adata, multiguide = False):
         sum_ntc = float(ntc_expr.sum())
         sumsq_ntc = float(np.dot(ntc_expr, ntc_expr))
         ntc_cells = ntc_expr.size
-    
+        
         rows.append({
             "guide_id": guide,
             "target_gene": gene,
@@ -190,12 +197,37 @@ def guide_efficiency_record(adata, multiguide = False):
             "sum_ntc": sum_ntc,
             "sumsq_ntc": sumsq_ntc,
         })
+        
+        # Pseudo P value to check cells was KO efficiency
+        if gene  not in ntc_expr_sorted_cache:
+            ntc_expr_sorted_cache[gene] = np.sort(ntc_expr)
+        
+        ntc_expr_sorted = ntc_expr_sorted_cache[gene]
 
+        if len(ntc_expr_sorted) == 0:
+            fractions = np.full(expr.shape, np.nan, dtype=float)
+        else:
+            fractions = np.searchsorted(ntc_expr_sorted, expr, side="left") / len(ntc_expr_sorted)
+
+        
+        guide_dfs.append(
+            pd.DataFrame({
+                "guide_id": guide,
+                "cell_id": cell_idx,
+                "expr": expr,
+                "ntc_fraction": fractions,
+            })
+        )
     
     df = pd.DataFrame(rows)
     
+    df_guide_cells_eff = pd.concat(guide_dfs, ignore_index=True) if guide_dfs else pd.DataFrame(columns=["guide_id", "cell_id", "expr", "ntc_fraction"])
+    
+    
+    
+    
 
-    return df
+    return df, df_guide_cells_eff
 
 def main():
     parser = argparse.ArgumentParser(description="Processing QC of guide assignment")
