@@ -17,7 +17,7 @@ from scipy import sparse
 from tqdm import tqdm
 import multiprocessing as mp
 
-def make_pseudobulk(adata, condition_col='lane_id', sgrna_col='guide_id'):
+def make_pseudobulk(adata, condition_col='lane_id', sgrna_col='gRNA'):
     """
     Create pseudobulk data from single-cell RNA-seq data.
     
