@@ -191,7 +191,6 @@ def main():
     args = parser.parse_args()
 
     
-    # Build list of jobs: one per (colname, value)
     
     pattern = glob.glob(os.path.join(args.processed_dir, '*_DE_pseudobulk_for_test.h5ad'))[0]
     
