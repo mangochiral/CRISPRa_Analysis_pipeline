@@ -11,5 +11,8 @@ src/
 │   ├── qc_guide_type_distribution.ipynb
 │   ├── qc_plot_cumulative_perturbation_fraction_of_genes.ipynb
 ├── pseudobulk_by_lane.py
+│   │── prep_DE_merge_pseudobulk.ipynb
+├── Deseq2_pseudobulk.py
+
 
 ```        
