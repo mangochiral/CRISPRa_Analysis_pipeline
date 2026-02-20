@@ -17,7 +17,7 @@ from scipy import sparse
 from tqdm import tqdm
 import multiprocessing as mp
 
-def make_pseudobulk(adata, condition_col='lane_id', sgrna_col='gRNA'):
+def make_pseudobulk(adata, *args, **kwargs):
     """
     Create pseudobulk data from single-cell RNA-seq data.
     
@@ -31,10 +31,10 @@ def make_pseudobulk(adata, condition_col='lane_id', sgrna_col='gRNA'):
         Column name for sgRNA information, default is 'guide_id'
     """
     
-    sample_cols = [sgrna_col,condition_col]
-    adata.obs["sample_id"] = adata.obs[sample_cols].apply(lambda x: "_".join(x), axis=1)
-    n_cells_obs = adata.obs.value_counts(['sample_id'] + ['library_id', 'target_gene', 'sgRNA_type']
-                                         + sample_cols).reset_index()
+    sample_cols = list(args)
+    meta_cols = list(kwargs.values())
+    adata.obs["sample_id"] = adata.obs[sample_cols].apply(lambda x: "_".join(x.astype(str)), axis=1)
+    n_cells_obs = adata.obs.value_counts(['sample_id'] + sample_cols+ meta_cols).reset_index()
     n_cells_obs = n_cells_obs.set_index('sample_id').rename({'count':'n_cells'}, axis=1)
     pbulk_adata = sc.get.aggregate(adata, by=['sample_id'], func=['sum'])
     pbulk_adata.obs = n_cells_obs.loc[pbulk_adata.obs_names].copy()
@@ -43,7 +43,7 @@ def make_pseudobulk(adata, condition_col='lane_id', sgrna_col='gRNA'):
 
 def run_pbulk_jobs(run):
     # Worker for a single (colname, value) job.
-    processed_dir, colname, value, condition_col, sgrna_col = run
+    processed_dir, colname, value, pb_args, pb_kwargs= run
 
     directory_path = os.path.join(processed_dir, f"{colname}_{value}")
     if not os.path.isdir(directory_path):
@@ -64,7 +64,7 @@ def run_pbulk_jobs(run):
 
     gex_singlets = sc.read_h5ad(gex_singlets_pattern[0])
     
-    pbulk_adata = make_pseudobulk(gex_singlets, condition_col, sgrna_col)
+    pbulk_adata = make_pseudobulk(gex_singlets, *pb_args, **pb_kwargs)
     
     pbulk_adata.write_h5ad(
         os.path.join(directory_path, f"{colname}_DE_pseudobulk.h5ad")
@@ -99,24 +99,46 @@ def main():
         help="Array task ID - processes single run from list",
     )
     parser.add_argument(
-        '--condition_col', 
+        '--column_args', 
         type=str, 
-        default='lane_id',
-        help='Column name for condition information'
+        nargs='+',
+        default=None,
+        help='Column name on aggregation done information'
         )
     parser.add_argument(
-        '--sgrna_col', type=str, 
-        default='guide_id',
-        help='Column name for sgRNA information'
+        '--column_kwargs', 
+        type=str, 
+        nargs='+',
+        default=None,
+        help=(
+            'Additional metadata columns as key=value pairs'
+            '(e.g. sequence=guide_sequence sgRNA_type=sgRNA_type goi=target_gene)'
+            )
         )
+   
     args = parser.parse_args()
     exp_meta = pd.read_csv(os.path.join(args.processed_dir, args.expmeta))
 
     # Drop any Unnamed index-like columns
     exp_meta = exp_meta.loc[:, ~exp_meta.columns.str.startswith("Unnamed")]
     
+    # Parse column_args into a tuple for *args of make_pseudobulk
+    pb_args = tuple(args.column_args) if args.column_args else ()
+    
+    # Parse column_kwargs into a dict for **kwargs of make_pseudobulk
+    # Expected format: key=value key=value ...
+    pb_kwargs = {}
+    if args.column_kwargs:
+        for item in args.column_kwargs:
+            if "=" not in item:
+                raise ValueError(
+                    f"--column_kwargs entries must be key=value, got: '{item}'"
+                )
+            k, v = item.split("=", 1)
+            pb_kwargs[k] = v
+    
     # Build list of jobs: one per (colname, value)
-    runs_args = [(args.processed_dir, sample_name, lane_id, args.condition_col, args.sgrna_col)for lane_id in exp_meta
+    runs_args = [(args.processed_dir, sample_name, lane_id, pb_args, pb_kwargs)for lane_id in exp_meta
         for sample_name in exp_meta[lane_id].dropna()]
     
     # If task_id is provided, process only that single run
