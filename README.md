@@ -8,8 +8,9 @@ This repository provides tools and scripts for preprocessing, analyzing, and vis
 
 ```
 src/
-├── basic_processing.py
-│   └── preprocess_adata.py          # Data preprocessing utilities
+├── preprocessing
+│    ├── basic_processing.py
+│    ├── preprocess_adata.py          # Data preprocessing utilities to be imported in <basic_processing.py>
 ├── guide_assignment_parallel.py     # Assign guides in parallel
 ├── qc_stats.py                     # Quality control statistics (standard)
 ├── qc_stats_heavy_load.py          # QC for large datasets (summary, t-test)
