@@ -63,7 +63,7 @@ Initial QC was done to remove low quality cells i.e, high mitochondrial percent,
 Prefer a notebook experience? You can run preprocessing directly with Jupyter Notebooks:
 
 ```bash
-jupyter notebook preprocess.ipynb
+jupyter notebook preprocess_tutorial.ipynb
 ```
 ---
 
@@ -71,6 +71,7 @@ jupyter notebook preprocess.ipynb
 
 - Main Python script: `basic_processing.py`
 - Notebooks live here for demonstration and stepwise analysis
+- Check for any prefix you might use for guide names which might need some clean up
 - Use the `--help` flag for CLI options:
 
 ```bash
