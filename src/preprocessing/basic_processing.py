@@ -10,7 +10,6 @@ import sys
 import os
 import pandas as pd
 import argparse
-from concurrent.futures import ProcessPoolExecutor
 import multiprocessing as mp
 import preprocess_adata as ppr
 
