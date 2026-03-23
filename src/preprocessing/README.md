@@ -1,6 +1,27 @@
-## Submitting Preprocessing as a SLURM Job
+# 🧬 Preprocessing with SLURM & Interactive Analysis Pipeline
 
-You can use the provided `submit_preprocessing.sh` script to submit preprocessing tasks on a SLURM cluster.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
+![Jupyter](https://img.shields.io/badge/jupyter-notebook-orange)
+![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
+
+---
+
+Welcome to the **Preprocessing** module of the CRISPRa Analysis Pipeline! This section covers SLURM job submission and running interactive Jupyter-based analysis.
+
+<details>
+<summary>🌟 Table of Contents</summary>
+
+- [How to Run with SLURM](#how-to-run-with-slurm)
+- [Interactive Usage](#interactive-usage)
+- [Parameters & Tips](#parameters--tips)
+- [Contact](#contact)
+</details>
+
+---
+
+## 🚦 How to Run with SLURM
+
+You can use the provided `submit_preprocessing.sh` script to submit preprocessing tasks on a cluster. Example job config:
 
 ```bash
 #!/bin/bash
@@ -14,15 +35,56 @@ You can use the provided `submit_preprocessing.sh` script to submit preprocessin
 export OMP_NUM_THREADS=1
 
 # Run the guide assignment
-python3 basic_processing.py \
-  --cellranger_dir <PATH TO CELLRANGER DIRECTORY> \
-  --experiment_info <EXPERIMENT META INFO CSV> \
-  --mt_pct <MITOCHONDRIAL THRESHOLD> \
-  --prefix None \
-  --exp crispr \
-  --filter_cells <FALSE if no filter must be executed> \
-  --output_dir <PATH TO OUTPUT DIRECTORY> \
+python3 basic_processing.py \ 
+  --cellranger_dir <PATH TO CELLRANGER DIRECTORY> \ 
+  --experiment_info <EXPERIMENT META INFO CSV> \ 
+  --mt_pct <MITOCHONDRIAL THRESHOLD> \ 
+  --prefix None \ 
+  --exp crispr \ 
+  --filter_cells <FALSE if no filter must be executed> \ 
+  --output_dir <PATH TO OUTPUT DIRECTORY> \ 
   --nprocs "${SLURM_CPUS_PER_TASK}"
 
 echo "Completed!"
 ```
+
+---
+
+## 📔 Interactive Usage
+
+Prefer a notebook experience? You can run preprocessing directly with Jupyter Notebooks:
+
+```bash
+jupyter notebook preprocess.ipynb
+```
+
+- Walk through each cell interactively.
+- Great for debugging, visualization, and customizing your workflow!
+
+---
+
+## ⚙️ Parameters & Tips
+
+- Main Python script: `basic_processing.py`
+- Notebooks live here for demonstration and stepwise analysis
+- Use the `--help` flag for CLI options:
+
+```bash
+python3 basic_processing.py --help
+```
+
+---
+
+## 🦠 Example Output
+
+![Example Plot or Table](https://your-link-here.com/plot.png)
+
+---
+
+## 📬 Contact
+
+Questions or suggestions? [Open an issue](https://github.com/mangochiral/CRISPRa_Analysis_pipeline/issues) or email <your.email@example.com>.
+
+---
+
+> *Beautiful, reproducible science starts here!*
