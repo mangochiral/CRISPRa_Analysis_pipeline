@@ -57,6 +57,7 @@ python3 basic_processing.py \
   --nprocs "${SLURM_CPUS_PER_TASK}"
 
 echo "Completed!"
+```
 
 ## Getting Started
 
