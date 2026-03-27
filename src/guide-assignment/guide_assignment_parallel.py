@@ -4,8 +4,6 @@
 Created on Thu Feb  5 14:12:01 2026
 
 @author: chandrima.modak
-
-PRODUCTION VERSION - Bug fixes + robust resume validation
 """
 import os
 import sys
@@ -14,190 +12,38 @@ import scanpy as sc
 import numpy as np
 import pandas as pd
 import crispat
-import anndata as ad
-from pathlib import Path
+import anndata
 import argparse
 from scipy import sparse
 import multiprocessing as mp
-import tempfile
-import shutil
+from typing import List
 
 
 # =============================================================================
-# Batch guide Assignment Helper
+# Non-daemonic Pool — allows child processes to spawn grandchildren
 # =============================================================================
 
-def _batch_guide_assign(args):
-    """
-    Parameters
-    ----------
-    args : tuple
-        (chunk_adata, chunk_gRNA, output_dir, n_iter, seed)
-
-    Returns
-    -------
-    batch_perturb_df : pd.DataFrame
-        Cells with their assigned guides and UMI counts.
-    batch_threshold_df : pd.DataFrame
-        Threshold per guide.
-    """
-    chunk_adata, chunk_gRNA, output_dir, n_iter, seed = args
-
-    # Ensure trailing separator for crispat path handling
-    if not output_dir.endswith(os.sep):
-        output_dir_for_crispat = output_dir + os.sep
-    else:
-        output_dir_for_crispat = output_dir
-
-    batch_perturb_list = []
-    batch_threshold_list = []
-    errors = []
-
-    for gRNA in chunk_gRNA:
-        try:
-            perturbed_cells, threshold, loss, map_estimates = crispat.fit_PGMM(
-                gRNA, chunk_adata, output_dir_for_crispat, seed, n_iter
-            )
-
-            # Always record the threshold for this guide
-            batch_threshold_list.append({"gRNA": gRNA, "Threshold": threshold})
-
-            if len(perturbed_cells) != 0:
-                UMI_counts = chunk_adata[perturbed_cells, [gRNA]].X.toarray().ravel()
-                batch_perturb_list.append(
-                    pd.DataFrame(
-                        {
-                            "cell": perturbed_cells,
-                            "gRNA": gRNA,
-                            "UMI_counts": UMI_counts,
-                        }
-                    )
-                )
-
-        except Exception as e:
-            error_msg = f"Failed for {gRNA}: {e}"
-            print(error_msg)
-            errors.append(error_msg)
-            continue
-
-    if errors:
-        print(f"WARNING: Encountered {len(errors)} errors in this batch")
-
-    if batch_perturb_list:
-        batch_perturb_df = pd.concat(batch_perturb_list, ignore_index=True)
-    else:
-        batch_perturb_df = pd.DataFrame(columns=["cell", "gRNA", "UMI_counts"])
-
-    if batch_threshold_list:
-        batch_threshold_df = pd.DataFrame(batch_threshold_list)
-    else:
-        batch_threshold_df = pd.DataFrame(columns=["gRNA", "Threshold"])
-
-    return batch_perturb_df, batch_threshold_df
-
-
-# =============================================================================
-# File validation helpers
-# =============================================================================
-
-def _validate_batch_files(perturb_file, thresh_file):
-    """
-    Validate that batch files exist and contain valid data.
-    
-    Parameters
-    ----------
-    perturb_file : str
-        Path to perturbation CSV file
-    thresh_file : str
-        Path to threshold CSV file
-        
-    Returns
-    -------
-    bool
-        True if both files exist and are valid, False otherwise
-    """
-    # Check both files exist
-    if not (os.path.exists(perturb_file) and os.path.exists(thresh_file)):
-        return False
-    
-    try:
-        # Attempt to read perturbation file
-        perturb_df = pd.read_csv(perturb_file)
-        
-        # Check expected columns exist
-        expected_perturb_cols = ["cell", "gRNA", "UMI_counts"]
-        if not all(col in perturb_df.columns for col in expected_perturb_cols):
-            print(f"WARNING: Invalid columns in {perturb_file}")
-            return False
-        
-        # Check data types are reasonable (not all NaN)
-        if perturb_df[expected_perturb_cols].isna().all().any():
-            print(f"WARNING: All NaN columns in {perturb_file}")
-            return False
-            
-        # Attempt to read threshold file
-        thresh_df = pd.read_csv(thresh_file)
-        
-        # Check expected columns exist
-        expected_thresh_cols = ["gRNA", "Threshold"]
-        if not all(col in thresh_df.columns for col in expected_thresh_cols):
-            print(f"WARNING: Invalid columns in {thresh_file}")
-            return False
-        
-        # Threshold file should not be empty (even if perturb is)
-        if len(thresh_df) == 0:
-            print(f"WARNING: Empty threshold file {thresh_file}")
-            return False
-        
-        # Files are valid
-        return True
-        
-    except pd.errors.EmptyDataError:
-        print(f"WARNING: Empty CSV file detected")
-        return False
-    except Exception as e:
-        print(f"WARNING: Error validating batch files: {e}")
+class _NoDaemonProcess(mp.Process):
+    """A Process subclass that is never daemonic, so it can spawn children."""
+    @property
+    def daemon(self):
         return False
 
+    @daemon.setter
+    def daemon(self, value):
+        pass  # ignore attempts to set daemon=True
 
-def _atomic_csv_write(df, filepath, output_dir):
-    """
-    Write CSV atomically using temp file + rename.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame to write
-    filepath : str
-        Final destination path
-    output_dir : str
-        Directory for temp file (same filesystem as filepath)
-    """
-    # Create temp file in same directory to ensure same filesystem
-    with tempfile.NamedTemporaryFile(
-        mode='w', 
-        delete=False, 
-        dir=output_dir, 
-        suffix='.tmp',
-        prefix='.batch_'
-    ) as tmp:
-        tmp_path = tmp.name
-    
-    try:
-        # Write to temp file
-        df.to_csv(tmp_path, index=False)
-        
-        # Atomic rename (on most filesystems)
-        shutil.move(tmp_path, filepath)
-        
-    except Exception as e:
-        # Clean up temp file on error
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except:
-                pass
-        raise e
+
+class _NoDaemonContext(type(mp.get_context())):
+    """A multiprocessing context that uses non-daemon processes."""
+    Process = _NoDaemonProcess
+
+
+class NoDaemonPool(mp.pool.Pool):
+    """A Pool that uses non-daemon workers, allowing nested Pool inside workers."""
+    def __init__(self, *args, **kwargs):
+        kwargs['context'] = _NoDaemonContext()
+        super().__init__(*args, **kwargs)
 
 
 class assign_sgrna:
@@ -208,16 +54,90 @@ class assign_sgrna:
         self.all_thresholds = pd.DataFrame()
 
     # =============================================================================
+    # Batch guide Assignment Helper
+    # =============================================================================
+    @staticmethod
+    def _batch_guide_assign(
+            chunk_adata: anndata.AnnData,
+            chunk_gRNA: List[str],
+            output_dir: str,
+            n_iter: int,
+            seed=2025
+            ) -> dict:
+        """
+        Process a batch of gRNAs through crispat.fit_PGMM.
+
+        Returns
+        -------
+        batch_perturb_df : pd.DataFrame
+            Cells with their assigned guides and UMI counts.
+        batch_threshold_df : pd.DataFrame
+            Threshold per guide.
+        """
+
+        # Ensure trailing separator for crispat path handling
+        if not output_dir.endswith(os.sep):
+            output_dir_for_crispat = output_dir + os.sep
+        else:
+            output_dir_for_crispat = output_dir
+
+        batch_perturb_list = []
+        batch_threshold_list = []
+        errors = []
+
+        for gRNA in chunk_gRNA:
+            try:
+                perturbed_cells, threshold, loss, map_estimates = crispat.fit_PGMM(
+                    gRNA, chunk_adata, output_dir_for_crispat, seed, n_iter
+                )
+
+                # Always record the threshold for this guide
+                batch_threshold_list.append({"gRNA": gRNA, "Threshold": threshold})
+
+                if len(perturbed_cells) != 0:
+                    UMI_counts = chunk_adata[perturbed_cells, [gRNA]].X.toarray().ravel()
+                    batch_perturb_list.append(
+                        pd.DataFrame(
+                            {
+                                "cell": perturbed_cells,
+                                "gRNA": gRNA,
+                                "UMI_counts": UMI_counts,
+                            }
+                        )
+                    )
+
+            except Exception as e:
+                error_msg = f"Failed for {gRNA}: {e}"
+                print(error_msg)
+                errors.append(error_msg)
+                continue
+
+        if errors:
+            print(f"WARNING: Encountered {len(errors)} errors in this batch")
+
+        if batch_perturb_list:
+            batch_perturb_df = pd.concat(batch_perturb_list, ignore_index=True)
+        else:
+            batch_perturb_df = pd.DataFrame(columns=["cell", "gRNA", "UMI_counts"])
+
+        if batch_threshold_list:
+            batch_threshold_df = pd.DataFrame(batch_threshold_list)
+        else:
+            batch_threshold_df = pd.DataFrame(columns=["gRNA", "Threshold"])
+
+        return batch_perturb_df, batch_threshold_df
+
+    # =============================================================================
     # Guide level parallel processing
     # =============================================================================
 
-    def run_guide_assign(self, num_cores=None, n_iter=500, seed=2025, end_idx=None, 
-                        batch_size=1000, resume=True):
+    def run_guide_assign(self, num_cores=None, n_iter=500, seed=2025, end_idx=None,
+                         batch_size=1000):
         """
         Parameters
         ----------
         num_cores : int, optional
-            Number of cores for parallel processing.
+            Number of cores for the inner guide-batch pool.
         n_iter : int
             Number of iterations.
         seed : int
@@ -226,8 +146,6 @@ class assign_sgrna:
             End index for gRNA list.
         batch_size : int
             Size of batches for processing.
-        resume : bool
-            Whether to resume from existing batch files.
 
         Returns
         -------
@@ -236,13 +154,11 @@ class assign_sgrna:
         all_thresholds : pd.DataFrame
             Threshold per guide.
         """
-        slurm_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
-        max_cpus = min(mp.cpu_count(), slurm_cpus)
-        
         if num_cores is None:
-            num_cores = max_cpus
+            slurm_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
+            num_cores = min(mp.cpu_count(), slurm_cpus)
         else:
-            num_cores = min(int(num_cores), max_cpus)
+            num_cores = max(1, int(num_cores))
 
         output_dir = self.path
 
@@ -254,11 +170,6 @@ class assign_sgrna:
             print(f"WARNING: Directory creation issue: {e}")
 
         gRNA_list = self.adata_crispr_file.var_names.tolist()
-        
-        # Where per-batch outputs go
-        batch_out = os.path.join(output_dir, "batch_outputs")
-        if resume:
-            os.makedirs(batch_out, exist_ok=True)
 
         # Determine chunk boundaries
         if end_idx is None:
@@ -269,140 +180,33 @@ class assign_sgrna:
         # Build arguments for parallel processing
         runs_args = []
         batch_ids = []
-        skipped_count = 0
-        reprocessed_count = 0
-        
+
         for i in range(0, end_idx, batch_size):
             batch_id = i // batch_size
-            
-            if resume:
-                # FIX: Use zero-padded batch IDs for correct sorting
-                perturb_file = os.path.join(batch_out, f"perturb_batch_{batch_id:04d}.csv")
-                thresh_file = os.path.join(batch_out, f"threshold_batch_{batch_id:04d}.csv")
-
-                # ROBUST: Validate files before skipping
-                if _validate_batch_files(perturb_file, thresh_file):
-                    skipped_count += 1
-                    continue
-                
-                # If files exist but are invalid, delete them
-                for filepath in [perturb_file, thresh_file]:
-                    if os.path.exists(filepath):
-                        try:
-                            os.remove(filepath)
-                            reprocessed_count += 1
-                        except OSError as e:
-                            print(f"WARNING: Could not remove {filepath}: {e}")
-                
-            chunk_gRNA = gRNA_list[i : i + batch_size]
+            chunk_gRNA = gRNA_list[i: i + batch_size]
             chunk_adata = self.adata_crispr_file[:, chunk_gRNA].copy()
             runs_args.append((chunk_adata, chunk_gRNA, output_dir, n_iter, seed))
             batch_ids.append(batch_id)
-        
-        if resume:
-            print(f"[resume] Skipped {skipped_count} completed batches")
-            if reprocessed_count > 0:
-                print(f"[resume] Reprocessing {reprocessed_count // 2} batches with invalid files")
-            
-        # Nothing to do (everything already complete)
-        if resume and len(runs_args) == 0:
-            print("[resume] No remaining batches to run; merging existing outputs.")
-            return self._merge_from_disk(batch_out)
 
-        # FIX: Use spawn for both Windows and macOS
+        all_perturb = []
+        all_threshold = []
+
+        print(f"  Guide-level pool: {num_cores} cores, {len(batch_ids)} batches")
+
+        # Inner pool for guide batches (grandchild processes)
         ctx = mp.get_context("spawn" if sys.platform in ["win32", "darwin"] else "fork")
-        
-        print(f"Processing {len(runs_args)} batches with {num_cores} cores")
-        
-        # OWhen resume=True, don't collect in memory
-        if resume:
-            with ctx.Pool(processes=num_cores) as pool:
-                for batch_id, (batch_perturb_df, batch_threshold_df) in zip(
-                    batch_ids, pool.imap(_batch_guide_assign, runs_args)
-                ):
-                    # FIX: Use zero-padded batch IDs + atomic writes
-                    perturb_file = os.path.join(batch_out, f"perturb_batch_{batch_id:04d}.csv")
-                    thresh_file = os.path.join(batch_out, f"threshold_batch_{batch_id:04d}.csv")
-                    
-                    try:
-                        _atomic_csv_write(batch_perturb_df, perturb_file, batch_out)
-                        _atomic_csv_write(batch_threshold_df, thresh_file, batch_out)
-                        print(f"Completed batch {batch_id}")
-                    except Exception as e:
-                        print(f"ERROR: Failed to write batch {batch_id}: {e}")
-                        # Clean up any partial files
-                        for filepath in [perturb_file, thresh_file]:
-                            if os.path.exists(filepath):
-                                try:
-                                    os.remove(filepath)
-                                except:
-                                    pass
-                        raise
-            
-            return self._merge_from_disk(batch_out)
-        
-        else:
-            # Non-resume mode: collect in memory for backward compatibility
-            all_perturb = []
-            all_threshold = []
-            
-            with ctx.Pool(processes=num_cores) as pool:
-                for batch_id, (batch_perturb_df, batch_threshold_df) in zip(
-                    batch_ids, pool.imap(_batch_guide_assign, runs_args)
-                ):
-                    print(f"Completed batch {batch_id}")
-                    all_perturb.append(batch_perturb_df)
-                    all_threshold.append(batch_threshold_df)
+        with ctx.Pool(processes=num_cores) as pool:
+            for batch_id, (batch_perturb_df, batch_threshold_df) in zip(
+                batch_ids, pool.starmap(assign_sgrna._batch_guide_assign, runs_args)):
+                print(f"  Completed batch {batch_id}")
+                all_perturb.append(batch_perturb_df)
+                all_threshold.append(batch_threshold_df)
 
-            if all_perturb:
-                self.perturbations = pd.concat(all_perturb, ignore_index=True)
-                self.all_thresholds = pd.concat(all_threshold, ignore_index=True)
-            else:
-                self.perturbations = pd.DataFrame(columns=["cell", "gRNA", "UMI_counts"])
-                self.all_thresholds = pd.DataFrame(columns=["gRNA", "Threshold"])
-
-            return self.perturbations, self.all_thresholds
-    
-    def _merge_from_disk(self, batch_out):
-        """Merge all batch files from disk."""
-        perturb_files = sorted(glob.glob(os.path.join(batch_out, "perturb_batch_*.csv")))
-        thresh_files = sorted(glob.glob(os.path.join(batch_out, "threshold_batch_*.csv")))
-
-        print(f"Merging {len(perturb_files)} perturbation files and {len(thresh_files)} threshold files")
-
-        # Validate before merging
-        valid_perturb = []
-        valid_thresh = []
-        
-        for pf, tf in zip(perturb_files, thresh_files):
-            if _validate_batch_files(pf, tf):
-                valid_perturb.append(pf)
-                valid_thresh.append(tf)
-            else:
-                print(f"WARNING: Skipping invalid batch files: {pf}, {tf}")
-        
-        if valid_perturb:
-            try:
-                self.perturbations = pd.concat(
-                    [pd.read_csv(f) for f in valid_perturb], 
-                    ignore_index=True
-                )
-            except Exception as e:
-                print(f"ERROR: Failed to merge perturbation files: {e}")
-                raise
+        if all_perturb:
+            self.perturbations = pd.concat(all_perturb, ignore_index=True)
+            self.all_thresholds = pd.concat(all_threshold, ignore_index=True)
         else:
             self.perturbations = pd.DataFrame(columns=["cell", "gRNA", "UMI_counts"])
-
-        if valid_thresh:
-            try:
-                self.all_thresholds = pd.concat(
-                    [pd.read_csv(f) for f in valid_thresh], 
-                    ignore_index=True
-                )
-            except Exception as e:
-                print(f"ERROR: Failed to merge threshold files: {e}")
-                raise
-        else:
             self.all_thresholds = pd.DataFrame(columns=["gRNA", "Threshold"])
 
         return self.perturbations, self.all_thresholds
@@ -410,7 +214,7 @@ class assign_sgrna:
     # =============================================================================
     # Extracting cell level guide assignment processing
     # =============================================================================
-
+    @property
     def merge_guide_assign(self):
         """
         Returns
@@ -428,7 +232,6 @@ class assign_sgrna:
         idx_max = self.perturbations.groupby("cell")["UMI_counts"].idxmax()
         assignment_crispat = self.perturbations.loc[idx_max].copy()
 
-        # FIX: Use reindex for safer access
         # Mark cells with multiple sgRNAs
         assignment_crispat["guide_id"] = np.where(
             assignment_size.reindex(assignment_crispat["cell"].values, fill_value=1).values > 1,
@@ -439,13 +242,13 @@ class assign_sgrna:
         assignment_crispat.set_index("cell", inplace=True)
 
         return assignment_crispat
-
+    @property
     def make_binary_obsm(self):
         """
         Returns
         -------
         binary_matrix : pd.DataFrame
-            Binary cell × guide matrix.
+            Binary cell x guide matrix.
         """
         df_dummy = pd.get_dummies(
             self.perturbations[["cell", "gRNA"]],
@@ -459,12 +262,17 @@ class assign_sgrna:
 
 
 # =============================================================================
-# Per-sample job runner
+# Per-sample job runner (child process)
 # =============================================================================
 
 def run_guide_jobs(run):
-    """Worker for a single (processed_dir, colname, value) job."""
-    processed_dir, colname, value = run
+    """
+    Worker for a single (processed_dir, colname, value, inner_cores) job.
+
+    Called as a NON-DAEMON child process from main()'s NoDaemonPool.
+    Spawns grandchild processes via run_guide_assign's inner Pool.
+    """
+    processed_dir, colname, value, inner_cores = run
 
     directory_path = os.path.join(processed_dir, f"{value}_{colname}")
     if not os.path.isdir(directory_path):
@@ -492,10 +300,12 @@ def run_guide_jobs(run):
     gex_adata = sc.read_h5ad(gex_pattern[0])
 
     guide_assign = assign_sgrna(directory_path, crispr_a)
-    guide_assign.run_guide_assign(num_cores=None, resume=True)
+    # This child is non-daemonic, so it CAN spawn grandchildren
+    # inner_cores is pre-computed by main() to avoid oversubscription
+    guide_assign.run_guide_assign(num_cores=inner_cores)
 
-    binary_matrix = guide_assign.make_binary_obsm()
-    assignment_crispat = guide_assign.merge_guide_assign()
+    binary_matrix = guide_assign.make_binary_obsm
+    assignment_crispat = guide_assign.merge_guide_assign
 
     if assignment_crispat.empty:
         print(f"No assignments for {value}_{colname}, skipping write.")
@@ -524,11 +334,10 @@ def run_guide_jobs(run):
         )
     except Exception as e:
         print(f"ERROR: Error parsing target_gene for {value}_{colname}: {e}")
-        # Fallback: use guide_id as target_gene
         assignment_crispat.loc[~is_multi, "target_gene"] = (
             assignment_crispat.loc[~is_multi, "guide_id"].astype(str)
         )
-    
+
     assignment_crispat.loc[is_multi, "target_gene"] = "multi_sgRNA"
 
     # --- join onto obs ---
@@ -557,7 +366,7 @@ def run_guide_jobs(run):
 
 
 # =============================================================================
-# CLI entry point
+# CLI entry point (parent process)
 # =============================================================================
 
 def main():
@@ -569,6 +378,12 @@ def main():
         help="Path to processed directory",
     )
     parser.add_argument(
+        "--cellranger_dir",
+        type=str,
+        required=True,
+        help="Path to cellranger directory",
+    )
+    parser.add_argument(
         "--expmeta",
         type=str,
         required=True,
@@ -577,46 +392,46 @@ def main():
     parser.add_argument(
         "--nprocs",
         type=int,
-        default=mp.cpu_count(),
-        help="Number of worker processes",
-    )
-    parser.add_argument(
-        "--task_id",
-        type=int,
         default=None,
-        help="Array task ID — processes a single run from the list",
+        help="Number of outer sample-level workers (default: number of samples)",
     )
     args = parser.parse_args()
 
-    exp_meta = pd.read_csv(os.path.join(args.processed_dir, args.expmeta))
+    exp_meta = pd.read_csv(os.path.join(args.cellranger_dir, args.expmeta))
 
     # Drop any unnamed index-like columns
     exp_meta = exp_meta.loc[:, ~exp_meta.columns.str.startswith("Unnamed")]
 
     # Build list of jobs: one per (colname, value)
-    runs = [
+    jobs = [
         (args.processed_dir, colname, value)
         for colname, coldata in exp_meta.items()
         for value in coldata
     ]
 
-    if args.task_id is not None:
-        if args.task_id >= len(runs):
-            print(
-                f"ERROR: Task ID {args.task_id} exceeds number of runs ({len(runs)}). Exiting."
-            )
-            return
-        print(f"Task {args.task_id}: processing single run (total runs: {len(runs)})")
-        my_runs = [runs[args.task_id]]
-    else:
-        print(f"Processing all {len(runs)} runs with {args.nprocs} workers")
-        my_runs = runs
+    n_jobs = len(jobs)
+    slurm_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", mp.cpu_count()))
+    total_cpus = min(mp.cpu_count(), slurm_cpus)
 
-    # FIX: Use spawn for both Windows and macOS
-    ctx = mp.get_context("spawn" if sys.platform in ["win32", "darwin"] else "fork")
-    
-    with ctx.Pool(processes=args.nprocs) as pool:
-        for colname, value, status in pool.imap_unordered(run_guide_jobs, my_runs):
+    # Outer workers = number of samples (or user override), capped at total CPUs
+    nprocs = min(args.nprocs or n_jobs, n_jobs, total_cpus)
+
+    # Split remaining CPUs evenly across outer workers for inner guide parallelism
+    inner_cores = max(1, total_cpus // nprocs)
+
+    print(f"Processing {n_jobs} samples: {nprocs} outer workers x {inner_cores} inner cores "
+          f"({total_cpus} total CPUs)")
+
+    # Attach inner_cores to each job tuple so child workers know their CPU budget
+    runs = [
+        (processed_dir, colname, value, inner_cores)
+        for processed_dir, colname, value in jobs
+    ]
+
+    # NoDaemonPool: children are non-daemonic, so each can spawn its own
+    # inner Pool of grandchildren for guide-level parallelism
+    with NoDaemonPool(processes=nprocs) as pool:
+        for colname, value, status in pool.imap_unordered(run_guide_jobs, runs):
             print(f"{status}: {value}_{colname}")
 
 
