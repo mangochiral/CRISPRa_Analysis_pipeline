@@ -238,6 +238,12 @@ def main():
         help="Path to directory that processed dir",
     )
     parser.add_argument(
+        "--cellranger_dir",
+        type=str,
+        required=True,
+        help="Path to cellranger directory",
+    )
+    parser.add_argument(
         "--expmeta",
         type=str,
         required=True,
@@ -258,7 +264,7 @@ def main():
 
     
     args = parser.parse_args()
-    exp_meta = pd.read_csv(os.path.join(args.processed_dir, args.expmeta))
+    exp_meta = pd.read_csv(os.path.join(args.cellranger_dir, args.expmeta))
 
     # Drop any Unnamed index-like columns
     exp_meta = exp_meta.loc[:, ~exp_meta.columns.str.startswith("Unnamed")]
