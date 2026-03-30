@@ -1,80 +1,134 @@
 # guide-assignment
 
-This module is part of the [CRISPRa Analysis Pipeline](https://github.com/mangochiral/CRISPRa_Analysis_pipeline) and provides tools for assigning guide RNAs (gRNAs) to cells for CRISPR screening experiments.
+Part of the [CRISPRa Analysis Pipeline](https://github.com/mangochiral/CRISPRa_Analysis_pipeline), this module provides tools for assigning guide RNAs (gRNAs) to cells in CRISPR screening experiments.
 
 ## Features
 
-- Assigns candidate guide RNAs to cells
-- Outputs assignment tables compatible with downstream analysis and visualization.
-- QC stats of each targeting
-- Easily integrates with the overall CRISPRa pipeline.
+- Assigns candidate gRNAs to cells based on sequencing data
+- Produces assignment tables compatible with downstream analysis and visualization
+- Generates QC statistics for each targeting
+- Easily integrates into the larger CRISPRa pipeline
 
 ## Usage
 
-1. **Input Preparation**
-   - CRISPR assay Anndata objects containing guide RNA UMIs.
-   - Supported formats: `.h5ad` as described in the code.
+### 1. Input Preparation
 
-2. **Running guide-assignment**
-   - Launch the corresponding Python script.
-   - Example command:
+- Requires Anndata objects from CRISPR assays containing gRNA UMIs.
+- Supported input format: `.h5ad` files as described in the code.
 
-     ```bash
-	#!/bin/bash
-	#SBATCH --job-name=guide_assignment
-	#SBATCH --time=24:00:00
-	#SBATCH --mem=100G
-	#SBATCH --cpus-per-task=64
-	#SBATCH --output=logs/guide_assignment_%j.out
-	#SBATCH --error=logs/guide_assignment_%j.err
+### 2. Running guide-assignment
 
-	echo "Starting guide assignment on $(hostname) with ${SLURM_CPUS_PER_TASK} CPUs"
+You can run assignments via a standalone Python script (recommended for batch/cluster environments) or interactively in a Jupyter notebook.
 
-	# Pin BLAS/OpenMP to 1 thread — the Python script manages its own parallelism
-	export OMP_NUM_THREADS=1
-	export MKL_NUM_THREADS=1
-	export OPENBLAS_NUM_THREADS=1
-	export NUMEXPR_NUM_THREADS=1
+#### Example: SLURM Batch Script (Guide Assignment)
 
-	# Single job processes all samples in parallel:
-	#   main (parent) → NoDaemonPool with 8 children (one per sample)
-	#   each child   → inner Pool with 8 grandchildren (64 / 8 = 8 cores each)
-	#
-	# --nprocs controls outer workers (default = number of samples in metadata)
-	python3 guide_assignment_parallel.py \
-    	--processed_dir <PATH TO PROCESSED .h5ad DIRECTORY> \
-    	--cellranger_dir <PATH TO CELLRANGER DIR FOR EXPERIMENT METADATA CSV> \
-    	--expmeta expirements_meta.csv \
-    	--nprocs 8
+```bash
+#!/bin/bash
+#SBATCH --job-name=guide_assignment
+#SBATCH --time=24:00:00
+#SBATCH --mem=100G
+#SBATCH --cpus-per-task=64
+#SBATCH --output=logs/guide_assignment_%j.out
+#SBATCH --error=logs/guide_assignment_%j.err
 
-	echo "Completed all samples"
-     
-     ```
+echo "Starting guide assignment on $(hostname) with ${SLURM_CPUS_PER_TASK} CPUs"
 
-   - Or open the notebook in JupyterLab and proceed through the documented cells.
+# Restrict BLAS/OpenMP threading; Python script manages its own parallelism
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 
-3. **Parameters and Options**
-   - Filtering options (e.g., minimum on-target score).
-   - Aggregated guide statistics.
+python3 guide_assignment_parallel.py \
+    --processed_dir <PATH TO PROCESSED .h5ad DIRECTORY> \
+    --cellranger_dir <PATH TO CELLRANGER DIRECTORY WITH EXPERIMENT METADATA CSV> \
+    --expmeta experiments_meta.csv \
+    --nprocs 8
 
-Refer to the provided notebooks or scripts for in-depth usage and parameter settings.
+echo "Completed all samples"
+```
+
+Alternatively, open `guide_assignment_parallel.ipynb` in JupyterLab and follow the documented cells.
+
+---
+
+#### Example: SLURM Batch Script (Run QC Stats)
+
+Use this script to run QC statistics with `qc_stats_heavy_load.py` in array mode for parallel sample processing:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=guide_stats
+#SBATCH --array=0-7
+#SBATCH --time=8:00:00
+#SBATCH --mem=100G
+#SBATCH --cpus-per-task=16
+#SBATCH --output=logs/guide_stats%A_%a.out
+#SBATCH --error=logs/guide_stats%A_%a.err
+
+# Safer multiprocessing with numpy/BLAS
+export OMP_NUM_THREADS=1
+
+python3 qc_stats_heavy_load.py \
+  --processed_dir /groups/marson/chandrima/reanalysis_gw_crispr \
+  --cellranger_dir /groups/marson/chandrima/ron_data_gw_crispr/Diff053/cellranger \
+  --expmeta expirements_meta.csv \
+  --nprocs "${SLURM_CPUS_PER_TASK}" \
+  --multiguide False
+```
+
+---
+
+### 3. Parameters and Options
+
+- Supports filtering options (e.g., minimum on-target score)
+- Can aggregate and summarize guide statistics
+
+For in-depth parameterization and available options, refer to the provided notebooks or run scripts with the `--help` flag.
+
+---
+
+## Outputs
+
+### Guide Assignment Outputs
+
+For each experiment or lane, the following files are generated:
+
+- `guide_assignment.csv`:  
+  The main table assigning candidate guides to cells.
+
+- `guide_threshold`:  
+  Contains thresholding information used for guide calls.
+
+- `<expr_lane>_processed_guide.csv`:  
+  Per-lane processed guide assignments, with labels per cell/sample.
+
+- `<expr_lane>_gex_guide.h5ad`:  
+  An AnnData `.h5ad` file with all guide-assigned metadata (per cell assignments as AnnData.obs columns), plus gene expression (X) for those cells.  
+  This file is used as **input to the QC statistics step** (`qc_stats_heavy_load.py`).
+
+### QC Stats Outputs
+
+Each run of `qc_stats_heavy_load.py` produces, for each experiment/lane:
+
+- `<expr_lane>_guide_count_info.csv`:  
+  - Contains, for each guide:
+    - The number of cells assigned that guide
+    - The number of NTC (non-targeting control) cells
+    - mRNA expression levels of all cells assigned to that guide
+    - mRNA expression levels of the corresponding NTC cells
+
+---
 
 ## Example
 
 ```python
-# Example function call
 from assign_guides import assign_guides_to_targets
 
 assign_guides_to_targets('guides.csv', 'targets.csv', output='assigned_guides.csv')
 ```
 
-Check the `example/` subdirectory for demonstration files and outputs.
-
-
-
-## Acknowledgements
-
-Inspired by published CRISPRa libraries and community-developed analysis pipelines.
+Check the [example/](./example/) directory for sample data and output files.
 
 ---
 
