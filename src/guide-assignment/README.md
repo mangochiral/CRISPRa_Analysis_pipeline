@@ -1,4 +1,4 @@
-# guide-assignment
+# Guide-assignment
 
 Part of the [CRISPRa Analysis Pipeline](https://github.com/mangochiral/CRISPRa_Analysis_pipeline), this module provides tools for assigning guide RNAs (gRNAs) to cells in CRISPR screening experiments.
 
