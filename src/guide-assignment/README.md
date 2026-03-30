@@ -1,34 +1,60 @@
 # guide-assignment
 
-This module is part of the [CRISPRa Analysis Pipeline](https://github.com/mangochiral/CRISPRa_Analysis_pipeline) and provides tools for assigning guide RNAs (gRNAs) to genetic targets for CRISPR activation (CRISPRa) screening experiments.
+This module is part of the [CRISPRa Analysis Pipeline](https://github.com/mangochiral/CRISPRa_Analysis_pipeline) and provides tools for assigning guide RNAs (gRNAs) to cells for CRISPR screening experiments.
 
 ## Features
 
-- Assigns candidate guide RNAs to genes or other genomic features.
-- Supports input from custom design files (e.g., CSV, Excel, or BED).
-- Provides filtering based on sequence quality, location, and user-defined constraints.
+- Assigns candidate guide RNAs to cells
 - Outputs assignment tables compatible with downstream analysis and visualization.
+- QC stats of each targeting
 - Easily integrates with the overall CRISPRa pipeline.
 
 ## Usage
 
 1. **Input Preparation**
-   - Prepare a file containing guide RNA sequences and their intended targets.
-   - Supported formats: `.csv`, `.tsv`, `.xlsx`, or customized formats as described in the code.
+   - CRISPR assay Anndata objects containing guide RNA UMIs.
+   - Supported formats: `.h5ad` as described in the code.
 
 2. **Running guide-assignment**
-   - Launch the corresponding Jupyter Notebook or Python script.
-   - Example command (if script-based):
+   - Launch the corresponding Python script.
+   - Example command:
 
      ```bash
-     python assign_guides.py --input guides.csv --output assigned_guides.csv
+	#!/bin/bash
+#SBATCH --job-name=guide_assignment
+#SBATCH --time=24:00:00
+#SBATCH --mem=100G
+#SBATCH --cpus-per-task=64
+#SBATCH --output=logs/guide_assignment_%j.out
+#SBATCH --error=logs/guide_assignment_%j.err
+
+echo "Starting guide assignment on $(hostname) with ${SLURM_CPUS_PER_TASK} CPUs"
+
+# Pin BLAS/OpenMP to 1 thread — the Python script manages its own parallelism
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+# Single job processes all samples in parallel:
+#   main (parent) → NoDaemonPool with 8 children (one per sample)
+#   each child   → inner Pool with 8 grandchildren (64 / 8 = 8 cores each)
+#
+# --nprocs controls outer workers (default = number of samples in metadata)
+python3 guide_assignment_parallel.py \
+    --processed_dir /groups/marson/chandrima/reanalysis_gw_crispr \
+    --cellranger_dir /groups/marson/chandrima/ron_data_gw_crispr/Diff053/cellranger \
+    --expmeta expirements_meta.csv \
+    --nprocs 8
+
+echo "Completed all samples"
+     
      ```
 
    - Or open the notebook in JupyterLab and proceed through the documented cells.
 
 3. **Parameters and Options**
    - Filtering options (e.g., minimum on-target score).
-   - Custom assignments by region or transcript.
    - Aggregated guide statistics.
 
 Refer to the provided notebooks or scripts for in-depth usage and parameter settings.
@@ -44,22 +70,7 @@ assign_guides_to_targets('guides.csv', 'targets.csv', output='assigned_guides.cs
 
 Check the `example/` subdirectory for demonstration files and outputs.
 
-## Dependencies
 
-- Python 3.7+
-- pandas
-- numpy
-- Jupyter Notebook (optional, for interactive runs)
-
-Install with:
-
-```bash
-pip install -r requirements.txt
-```
-
-## License
-
-This module is released under the MIT License. See the [main repository](https://github.com/mangochiral/CRISPRa_Analysis_pipeline) for details.
 
 ## Acknowledgements
 
@@ -67,4 +78,3 @@ Inspired by published CRISPRa libraries and community-developed analysis pipelin
 
 ---
 
-For questions or contributions, please open an Issue or Pull Request on the [main repository](https://github.com/mangochiral/CRISPRa_Analysis_pipeline).
