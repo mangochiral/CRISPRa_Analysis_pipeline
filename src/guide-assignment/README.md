@@ -7,6 +7,7 @@ Part of the [CRISPRa Analysis Pipeline](https://github.com/mangochiral/CRISPRa_A
 - Assigns candidate gRNAs to cells based on sequencing data
 - Produces assignment tables compatible with downstream analysis and visualization
 - Generates QC statistics for each targeting
+- Includes summary notebooks for QC and data distribution insights
 - Easily integrates into the larger CRISPRa pipeline
 
 ## Usage
@@ -16,7 +17,7 @@ Part of the [CRISPRa Analysis Pipeline](https://github.com/mangochiral/CRISPRa_A
 - Requires Anndata objects from CRISPR assays containing gRNA UMIs.
 - Supported input format: `.h5ad` files as described in the code.
 
-### 2. Running guide-assignment
+### 2. Running Guide Assignment
 
 You can run assignments via a standalone Python script (recommended for batch/cluster environments) or interactively in a Jupyter notebook.
 
@@ -50,8 +51,6 @@ echo "Completed all samples"
 
 Alternatively, open `guide_assignment_parallel.ipynb` in JupyterLab and follow the documented cells.
 
----
-
 #### Example: SLURM Batch Script (Run QC Stats)
 
 Use this script to run QC statistics with `qc_stats_heavy_load.py` in array mode for parallel sample processing:
@@ -81,10 +80,10 @@ python3 qc_stats_heavy_load.py \
 
 ### 3. Parameters and Options
 
-- Supports filtering options (e.g., minimum on-target score)
-- Can aggregate and summarize guide statistics
+- Filtering options (e.g., minimum on-target score)
+- Aggregation and summary of guide statistics
 
-For in-depth parameterization and available options, refer to the provided notebooks or run scripts with the `--help` flag.
+For detailed parameterization and available options, refer to the provided notebooks or run scripts with the `--help` flag.
 
 ---
 
@@ -92,43 +91,39 @@ For in-depth parameterization and available options, refer to the provided noteb
 
 ### Guide Assignment Outputs
 
-For each experiment or lane, the following files are generated:
+For each experiment/lane, the following files are generated:
 
 - `guide_assignment.csv`:  
-  The main table assigning candidate guides to cells.
+  Main table assigning candidate guides to cells.
 
 - `guide_threshold`:  
-  Contains thresholding information used for guide calls.
+  Thresholding information used for guide calls.
 
 - `<expr_lane>_processed_guide.csv`:  
   Per-lane processed guide assignments, with labels per cell/sample.
 
 - `<expr_lane>_gex_guide.h5ad`:  
-  An AnnData `.h5ad` file with all guide-assigned metadata (per cell assignments as AnnData.obs columns), plus gene expression (X) for those cells.  
-  This file is used as **input to the QC statistics step** (`qc_stats_heavy_load.py`).
+  AnnData `.h5ad` file with all guide-assigned metadata (assignment columns inside `.obs`), and gene expression (`.X`) for the assigned cells.  
+  **This file is input to the QC statistics step (`qc_stats_heavy_load.py`).**
 
 ### QC Stats Outputs
 
 Each run of `qc_stats_heavy_load.py` produces, for each experiment/lane:
 
 - `<expr_lane>_guide_count_info.csv`:  
-  - Contains, for each guide:
-    - The number of cells assigned that guide
-    - The number of NTC (non-targeting control) cells
+  For each guide:
+    - Number of cells assigned that guide
+    - Number of NTC (non-targeting control) cells
     - mRNA expression levels of all cells assigned to that guide
-    - mRNA expression levels of the corresponding NTC cells
+    - mRNA expression levels of corresponding NTC cells
 
 ---
 
-## Example
+## Data Exploration & Visualization
 
-```python
-from assign_guides import assign_guides_to_targets
+Several Jupyter notebooks are provided for further exploration and QC visualization:
 
-assign_guides_to_targets('guides.csv', 'targets.csv', output='assigned_guides.csv')
-```
+- **Guide_type_distribuition.ipynb** — Explore the distribution of guide types across your data (e.g., targeting, non-targeting).
+- **Guides_per_cell_distribution_plots.ipynb** — Visualize the distribution of the number of guides assigned per cell.
 
-Check the [example/](./example/) directory for sample data and output files.
-
----
-
+Use these notebooks to gain insights into the assignment quality and experimental design.
