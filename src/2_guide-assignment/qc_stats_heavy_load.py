@@ -81,11 +81,11 @@ def clean_adata_for_multiguide(adata):
     
     adata.obs['sgRNA_type'] = 'Single sgRNA'
     
-    adata.obs.loc[adata.obs['guide_id'].isna(), 'sgRNA_type'] = 'no sgRNA'
+    adata.obs.loc[adata.obs['assigned_guide_id'].isna(), 'sgRNA_type'] = 'no sgRNA'
     
-    adata.obs.loc[adata.obs['guide_id'].str.startswith('NTC', na=False), 'sgRNA_type'] = 'single NTC sgRNA'
+    adata.obs.loc[adata.obs['assigned_guide_id'].str.startswith('NTC', na=False), 'sgRNA_type'] = 'single NTC sgRNA'
     
-    adata.obs.loc[adata.obs['guide_id'].str.startswith('multi', na=False), 'sgRNA_type'] = 'multi sgRNA'
+    adata.obs.loc[adata.obs['assigned_guide_id'].str.startswith('multi', na=False), 'sgRNA_type'] = 'multi sgRNA'
     
     # Order the rows
     type_order = ['Single sgRNA','single NTC sgRNA','multi sgRNA','no sgRNA']
@@ -127,8 +127,8 @@ def guide_efficiency_record(adata, multiguide = False):
         true_ntc_mask = (guide_cell_ntc - cells_with_ntc) == 0
 
         # Replace guide_id of multiguide values and NTC- with NTC
-        adata.obs['guide_id'] = adata.obs['guide_id'].astype(str)
-        adata.obs.loc[true_ntc_mask, 'guide_id'] = 'NTC'
+        adata.obs['assigned_guide_id'] = adata.obs['assigned_guide_id'].astype(str)
+        adata.obs.loc[true_ntc_mask, 'assigned_guide_id'] = 'NTC'
 
         # For Cells with single and multiguides 
         guide_list = guide_matrix.columns.to_list()
@@ -138,13 +138,13 @@ def guide_efficiency_record(adata, multiguide = False):
         
     
     else:
-        gRNA_list = adata.obs["guide_id"]
+        gRNA_list = adata.obs["assigned_guide_id"]
         guide_to_rows = gRNA_list.groupby(gRNA_list).indices
     
         guide_to_gene = {gene: gene.split("_")[0] for gene in guide_to_rows.keys()}
     
     # NTC mask calculated once
-    mask_ntc = adata.obs["guide_id"].astype(str).str.startswith('NTC').to_numpy()
+    mask_ntc = adata.obs["assigned_guide_id"].astype(str).str.startswith('NTC').to_numpy()
     
     # For targeted gene NTC Expression to calculate the pseudo p value
     ntc_expr_sorted_cache = {}
@@ -184,7 +184,7 @@ def guide_efficiency_record(adata, multiguide = False):
         ntc_cells = ntc_expr.size
         
         rows.append({
-            "guide_id": guide,
+            "assigned_guide_id": guide,
             "target_gene": gene,
 
             # guide sufficient stats
@@ -212,7 +212,7 @@ def guide_efficiency_record(adata, multiguide = False):
         
         guide_dfs.append(
             pd.DataFrame({
-                "guide_id": guide,
+                "assigned_guide_id": guide,
                 "cell_id": cell_idx,
                 "expr": expr,
                 "ntc_fraction": fractions,
@@ -221,7 +221,7 @@ def guide_efficiency_record(adata, multiguide = False):
     
     df = pd.DataFrame(rows)
     
-    df_guide_cells_eff = pd.concat(guide_dfs, ignore_index=True) if guide_dfs else pd.DataFrame(columns=["guide_id", "cell_id", "expr", "ntc_fraction"])
+    df_guide_cells_eff = pd.concat(guide_dfs, ignore_index=True) if guide_dfs else pd.DataFrame(columns=["assigned_guide_id", "cell_id", "expr", "ntc_fraction"])
     
     
     

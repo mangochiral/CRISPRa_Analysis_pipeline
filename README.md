@@ -1,74 +1,121 @@
-# CRISPRa Analysis Pipeline
+# Perturb-seq Analysis Pipeline Template
 
-## Overview
+## General Note
 
-This repository provides tools and scripts for preprocessing, analyzing, and visualizing data from CRISPR experiments.
+This repository serves as a **template** for processing and analyzing Perturb-seq data. The intent is for this codebase to act as a general starting point:  
+- **Do not edit scripts in this repository for project-specific needs.**  
+- Instead, **copy or fork this repository** into a new, project-specific folder or repo, and make any project-specific edits there.  
+This ensures that the template remains general-purpose and reusable for anyone starting a new Perturb-seq analysis project.
+
+## Purpose
+
+The scripts and workflows provided here are designed to cover the full pipeline for preprocessing, analyzing, and visualizing data from CRISPR-based Perturb-seq experiments. The focus is on modularity and generalizability:
+- **No hardcoding of experiment-specific details** (e.g., whether experiments are CRISPRi, CRISPRa, etc.).
+- The type of perturbation should be specified as metadata (e.g., in the AnnData object) during initial basic preprocessing.
+- All downstream scripts should handle experiment-specific behavior internally, based on this metadata.
 
 ## Directory Structure
 
 ```
 src/
-├── preprocessing
-│    ├── basic_processing.py
-│    ├── preprocess_adata.py          # Data preprocessing utilities to be imported in <basic_processing.py>
-├── guide_assignment_parallel.py     # Assign guides in parallel
-├── qc_stats.py                     # Quality control statistics (standard)
-├── qc_stats_heavy_load.py          # QC for large datasets (summary, t-test)
-├── guide_efficiency_qc_stats.ipynb # Guide efficiency QC with t-test
-├── qc_plots/
-│   ├── qc_guide_type_distribution.ipynb
-│   └── qc_plot_cumulative_perturbation_fraction_of_genes.ipynb
-├── pseudobulk_by_lane.py           # Pseudobulk analysis per lane
-│   └── prep_DE_merge_pseudobulk.ipynb # Prepare DE and merge pseudobulk results
-├── Deseq2_pseudobulk.py            # Run DESeq2 analysis on pseudobulked data
+├── preprocessing/
+│   ├── README.md
+│   ├── Sanity_Check.ipynb
+│   ├── basic_processing.py
+│   ├── preprocess_adata.py
+│   └── preprocess_tutorial.ipynb
+├── guide-assignment/
+│   ├── Guide_efficiency_plots.ipynb
+│   ├── Guide_efficiency_test_stats.ipynb
+│   ├── Guide_type_distribuition.ipynb
+│   ├── Guides_per_cell_distribution_plots.ipynb
+│   ├── Prep_for_guide_assignment.ipynb
+│   ├── README.md
+│   ├── Sanity_check.ipynb
+│   ├── guide_assignment_parallel.py
+│   └── qc_stats_heavy_load.py
+├── pseudobulk/
+│   ├── Keep_singlets_prep_adata.ipynb
+│   ├── prep_DE_merge_pseudobulk.ipynb
+│   └── pseudobulk_by_lane.py
+└── DGE_analysis/
+    └── Deseq2_pseudobulk.py
 ```
 
-## Getting Started
+## Best Practices
 
-1. **Preprocess your data** using `basic_processing.py` and `preprocess.py`.
-2. **Assign guides** with `guide_assignment_parallel.py`.
-3. **Quality control**: Use `qc_stats.py`, `qc_stats_heavy_load.py`, or the notebooks in `qc_plots/` for QC and visualization.
-4. **Pseudobulk analysis**: See `pseudobulk_by_lane.py` and related notebooks.
-5. **Differential expression analysis**: Use `Deseq2_pseudobulk.py`.
+- **Keep scripts general:** Avoid project-specific assumptions or hard-coded parameters.
+- **Use metadata:** Specify experiment type and other details in metadata files or AnnData objects, not in scripts.
+- **Fork, then customize:** For a new project, fork or copy this repo, then make modifications in your project copy only.
+- **Multiple script versions:** Provide both notebook (.ipynb) and script (.py) versions of analyses where possible, to support different user needs and computational environments. Examples:
+  - Notebooks for interactive or exploratory analysis.
+  - SLURM job scripts for high-throughput or large-scale processing.
 
-## Submitting Preprocessing as a SLURM Job
+## Getting Started (Template)
 
-You can use the provided `submit_preprocessing.sh` script to submit preprocessing tasks on a SLURM cluster.
+### 1. Preprocessing
+
+Use `basic_processing.py` and utilities in `preprocessing/` to clean and preprocess your raw data.  
+Choose between:
+- `.py` scripts for command-line/SLURM processing
+- `.ipynb` notebooks for interactive analysis (see `qc_plots/` and related files)
+
+### 2. Guide Assignment
+
+Assign guides in parallel with `guide_assignment_parallel.py`.
+
+### 3. Quality Control
+
+Run QC using:
+- `qc_stats.py`
+- `qc_stats_heavy_load.py` (for large datasets)
+- Notebooks in `qc_plots/` for interactive QC and visualization
+
+### 4. Pseudobulk & Differential Expression
+
+- Perform pseudobulk analysis with `pseudobulk_by_lane.py`.
+- Run DESeq2 with `Deseq2_pseudobulk.py`.
+
+### 5. SLURM Example
+
+A SLURM submission script (`submit_preprocessing.sh`) is provided for batch processing.
+Update the placeholders for your project as needed.
 
 ```bash
 #!/bin/bash
 #SBATCH --job-name=preprocessing
 #SBATCH --time=1:00:00
 #SBATCH --mem=100G
-#SBATCH --cpus-per-task=N         # <-- N CPUs per job
+#SBATCH --cpus-per-task=N
 #SBATCH --output=logs/preprocess_%A_%a.out
 #SBATCH --error=logs/preprocess_%A_%a.err
 
 export OMP_NUM_THREADS=1
 
-# Run the guide assignment
 python3 basic_processing.py \
   --cellranger_dir <PATH TO CELLRANGER DIRECTORY> \
   --experiment_info <EXPERIMENT META INFO CSV> \
   --mt_pct <MITOCHONDRIAL THRESHOLD> \
   --prefix None \
-  --exp crispr \
-  --filter_cells <FALSE if no filter must be executed> \
+  --exp <crisper/perturbation_type> \
+  --filter_cells <TRUE/FALSE> \
   --output_dir <PATH TO OUTPUT DIRECTORY> \
   --nprocs "${SLURM_CPUS_PER_TASK}"
 
 echo "Completed!"
 ```
 
-## Getting Started
-
-1. **Preprocess your data** using `basic_processing.py` and `preprocess.py`.
-2. **Assign guides** with `guide_assignment_parallel.py`.
-3. **Quality control**: Use `qc_stats.py`, `qc_stats_heavy_load.py`, or the notebooks in `qc_plots/` for QC and visualization.
-4. **Pseudobulk analysis**: See `pseudobulk_by_lane.py` and related notebooks.
-5. **Differential expression analysis**: Use `Deseq2_pseudobulk.py`.
-
 ## Notes
 
-- Jupyter notebooks (`.ipynb`) provide interactive analysis and plotting.
-- Each script is modular—run the steps relevant for your experiment.
+- **Jupyter notebooks (`.ipynb`)** are provided for interactive analyses and visualizations.
+- **Scripts are designed to be modular.** Run only the steps relevant for your experiment.
+- **Metadata-driven:** Each step should rely on experiment information provided via files/AnnData, not hardcoded.
+
+---
+
+**To contribute improvements:**  
+Generalize scripts further, improve modularity, or add new template scripts/noebooks—but avoid project-specific edits here.
+
+---
+
+**Remember: For project-specific pipelines, fork or copy this repo and apply your changes to your copy only.**
