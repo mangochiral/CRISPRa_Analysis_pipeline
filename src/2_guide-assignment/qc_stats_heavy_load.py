@@ -97,6 +97,21 @@ def clean_adata_for_multiguide(adata):
     adata = adata[~((adata.obs["sgRNA_type"] == "multi sgRNA") & (adata.obs["total_counts"] > cut_off))].copy()
     return adata
 
+def change_to_df(adata):
+    """
+    Changing sparse matrix to dataframe
+    """
+    mat = adata.obsm["guide_matrix"]
+    if hasattr(mat, "toarray"):
+        arr = mat.toarray()
+    elif hasattr(mat, "sparse") or hasattr(mat, "to_dense"):
+        arr = np.asarray(mat)
+    else:
+        arr = np.asarray(mat)
+    guide_df = pd.DataFrame(arr, index=adata.obs_names, columns=adata.uns["guide_matrix_cols"])
+
+    return guide_df
+
 def guide_efficiency_record(adata, multiguide = False):
     
     rows = []
@@ -108,7 +123,7 @@ def guide_efficiency_record(adata, multiguide = False):
 
         
         # For NTC cells with multi guides
-        guide_matrix = adata.obsm["guide_matrix"] 
+        guide_matrix = change_to_df(adata)
         
         # Expect pandas DataFrame for this logic
         if not hasattr(guide_matrix, "columns"):
