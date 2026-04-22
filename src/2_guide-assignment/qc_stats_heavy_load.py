@@ -79,7 +79,7 @@ def run_guide_stats(run_procs):
 def clean_adata_for_multiguide(adata):
     adata.var_names = adata.var.gene_name
     
-    adata.obs['sgRNA_type'] = 'Single sgRNA'
+    adata.obs['sgRNA_type'] = 'single sgRNA'
     
     adata.obs.loc[adata.obs['assigned_guide_id'].isna(), 'sgRNA_type'] = 'no sgRNA'
     
