@@ -104,8 +104,6 @@ class run_DEseq2:
         # pbulk_adata = sc.read_h5ad(pattern)
         self.pbulk_adata = self.pbulk_adata[:, self.pbulk_adata.var['gene_name'].isin(gene_list)].copy()
         
-        # Filter genes where the total sum of counts is less than the threshold
-        self.pbulk_adata = self.pbulk_adata[:, self.pbulk_adata.X.sum(axis=0) >= min_counts_per_gene].copy()
         
         all_targets = self.pbulk_adata.obs['target_gene'].unique().tolist()
         
@@ -140,7 +138,8 @@ class run_DEseq2:
                 chunk_targets.append('NTC')
                 
             chunk_adata =  self.pbulk_adata[self.pbulk_adata.obs.target_gene.isin(chunk_targets)].copy()
-            
+            # Filter genes where the total sum of counts is less than the threshold
+            chunk_adata = chunk_adata[:, chunk_adata.X.sum(axis=0) >= min_counts_per_gene].copy()
             runs_args.append((chunk_adata, chunk_targets))
                 
         ctx = mp.get_context("fork" if sys.platform != "win32" else "spawn")
