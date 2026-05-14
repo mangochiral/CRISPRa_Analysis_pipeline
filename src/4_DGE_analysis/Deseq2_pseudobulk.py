@@ -104,6 +104,9 @@ class run_DEseq2:
         # pbulk_adata = sc.read_h5ad(pattern)
         self.pbulk_adata = self.pbulk_adata[:, self.pbulk_adata.var['gene_name'].isin(gene_list)].copy()
         
+        # Filter genes where the total sum of counts is less than the threshold
+        self.pbulk_adata = self.pbulk_adata[:, self.pbulk_adata.X.sum(axis=0) >= min_counts_per_gene].copy()
+        
         all_targets = self.pbulk_adata.obs['target_gene'].unique().tolist()
         
         gene_list = _get_features(self.path)
